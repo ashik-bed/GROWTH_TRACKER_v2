@@ -6,7 +6,7 @@ from datetime import datetime
 from pandas.tseries.offsets import DateOffset
 
 # ---------------- GOOGLE SHEETS SETTINGS ----------------
-SERVICE_ACCOUNT_FILE = "sheetconnector-468508-a9c1ca8a0d64.json"
+SERVICE_ACCOUNT_FILE = "sheetconnector-468508-1e0052475ae2.json"
 SPREADSHEET_ID = "1gJUFsC0WTohZvo1gVF925dpQMVNXSR3GmjrOUXf9cFU"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -97,6 +97,11 @@ if report_type in ["Gold", "Subdebt"] and old_file and new_file:
             old_df = read_file(old_file)
             new_df = read_file(new_file)
 
+            # ✅ Exclude Reliant Creditsfin from Subdebt reports
+            if report_type == "Subdebt" and "Customer Name" in old_df.columns and "Customer Name" in new_df.columns:
+                old_df = old_df[~old_df["Customer Name"].astype(str).str.strip().str.lower().eq("reliant creditsfin")]
+                new_df = new_df[~new_df["Customer Name"].astype(str).str.strip().str.lower().eq("reliant creditsfin")]
+
             required_cols = [value_column, staff_column, branch_column]
             missing_cols_old = [col for col in required_cols if col not in old_df.columns]
             missing_cols_new = [col for col in required_cols if col not in new_df.columns]
@@ -116,7 +121,19 @@ if report_type in ["Gold", "Subdebt"] and old_file and new_file:
                 old_group = old_df.groupby(group_column)[value_column].sum().reset_index()
                 new_group = new_df.groupby(group_column)[value_column].sum().reset_index()
 
-                merged = pd.merge(new_group, old_group, on=group_column, suffixes=('_New', '_Old'))
+                # ✅ Outer join + fillna(0) so missing staff/branches are included
+                merged = pd.merge(
+                    new_group,
+                    old_group,
+                    on=group_column,
+                    how="outer",
+                    suffixes=('_New', '_Old')
+                ).fillna(0)
+
+                # Ensure numeric before calculation
+                merged[f"{value_column}_New"] = pd.to_numeric(merged[f"{value_column}_New"], errors="coerce").fillna(0)
+                merged[f"{value_column}_Old"] = pd.to_numeric(merged[f"{value_column}_Old"], errors="coerce").fillna(0)
+
                 merged["Growth"] = merged[f"{value_column}_New"] - merged[f"{value_column}_Old"]
 
                 # Add Canvasser Name column
@@ -209,7 +226,6 @@ if report_type == "SS Pending Report" and pending_file:
         except Exception as e:
             st.error(f"❌ Error processing SS Pending Report: {e}")
 
-# (unchanged from your code)
 # ---------------- NPA ----------------
 # (unchanged from your code)
 
